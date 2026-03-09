@@ -198,7 +198,7 @@ cat verify_results/<テーブル名>.diff
 docker compose up -d
 
 # DBが起動するまで待つ
-docker compose exec mysql57 mysqladmin ping -h localhost -prootpass --wait=30
+docker compose exec mysql55 mysqladmin ping -h localhost -prootpass --wait=30
 
 # 検証実行
 sh scripts/01_dump_and_snapshot.sh
