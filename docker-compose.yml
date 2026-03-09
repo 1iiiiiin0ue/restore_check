@@ -1,0 +1,37 @@
+services:
+  mysql55:
+    image: mysql:5.5
+    container_name: restore_check_mysql55
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: testdb
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./docker/mysql55/init:/docker-entrypoint-initdb.d
+      - mysql55_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  mariadb10:
+    image: mariadb:10.11
+    container_name: restore_check_mariadb10
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpass
+      MARIADB_DATABASE: testdb
+    ports:
+      - "13307:3306"
+    volumes:
+      - mariadb10_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  mysql55_data:
+  mariadb10_data:
