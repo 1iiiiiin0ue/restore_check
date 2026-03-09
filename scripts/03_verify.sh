@@ -9,12 +9,11 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
 log() {
-    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
+    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2
 }
 
 dst_mysql() {
-    mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" "$DST_DB" "$@" 2>&1 \
-        | grep -v "^\[Warning\].*password"
+    mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" "$DST_DB" "$@" 2>/dev/null
 }
 
 get_primary_key() {
@@ -47,7 +46,7 @@ fi
 
 # 接続テスト
 log "接続テスト: $DST_HOST:$DST_PORT ($DST_DB)"
-if ! dst_mysql -e "SELECT 1" >/dev/null; then
+if ! mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" "$DST_DB" -e "SELECT 1" >/dev/null 2>&1; then
     log "エラー: MariaDBに接続できません"
     log "  ホスト: $DST_HOST"
     log "  ポート: $DST_PORT"
@@ -119,10 +118,10 @@ while IFS='	' read -r table _; do
         tail_rows=$(dst_mysql -N -e "SELECT * FROM \`$table\` ORDER BY \`$pk\` DESC LIMIT $SAMPLE_ROWS" | sort)
 
         {
-            printf "--- HEAD %s ---\n" "$SAMPLE_ROWS"
-            printf "%s\n" "$head_rows"
-            printf "--- TAIL %s ---\n" "$SAMPLE_ROWS"
-            printf "%s\n" "$tail_rows"
+            echo "--- HEAD ${SAMPLE_ROWS} ---"
+            echo "$head_rows"
+            echo "--- TAIL ${SAMPLE_ROWS} ---"
+            echo "$tail_rows"
         } > "$new_sample"
     fi
 

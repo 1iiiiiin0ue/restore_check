@@ -10,12 +10,11 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
 log() {
-    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
+    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2
 }
 
 dst_mysql() {
-    mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" "$@" 2>&1 \
-        | grep -v "^\[Warning\].*password"
+    mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" "$@" 2>/dev/null
 }
 
 # コマンド存在チェック
@@ -33,7 +32,7 @@ fi
 
 # 接続テスト
 log "接続テスト: $DST_HOST:$DST_PORT"
-if ! dst_mysql -e "SELECT 1" >/dev/null; then
+if ! mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" -e "SELECT 1" >/dev/null 2>&1; then
     log "エラー: MariaDBに接続できません"
     log "  ホスト: $DST_HOST"
     log "  ポート: $DST_PORT"

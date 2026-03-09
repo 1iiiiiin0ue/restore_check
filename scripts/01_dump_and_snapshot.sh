@@ -10,12 +10,11 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
 log() {
-    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
+    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2
 }
 
 src_mysql() {
-    mysql -h "$SRC_HOST" -P "$SRC_PORT" -u "$SRC_USER" -p"$SRC_PASS" "$@" 2>&1 \
-        | grep -v "^\[Warning\].*password"
+    mysql -h "$SRC_HOST" -P "$SRC_PORT" -u "$SRC_USER" -p"$SRC_PASS" "$@" 2>/dev/null
 }
 
 get_tables() {
@@ -45,7 +44,7 @@ done
 
 # 接続テスト
 log "接続テスト: $SRC_HOST:$SRC_PORT ($SRC_DB)"
-if ! src_mysql "$SRC_DB" -e "SELECT 1" >/dev/null; then
+if ! mysql -h "$SRC_HOST" -P "$SRC_PORT" -u "$SRC_USER" -p"$SRC_PASS" "$SRC_DB" -e "SELECT 1" >/dev/null 2>&1; then
     log "エラー: MySQLに接続できません"
     log "  ホスト: $SRC_HOST"
     log "  ポート: $SRC_PORT"
@@ -64,7 +63,7 @@ mysqldump \
     --single-transaction \
     --routines \
     --triggers \
-    "$SRC_DB" 2>&1 | grep -v "^\[Warning\].*password" > "$DUMP_FILE"
+    "$SRC_DB" > "$DUMP_FILE" 2>/dev/null
 
 if [ ! -s "$DUMP_FILE" ]; then
     log "エラー: ダンプファイルが空です"
@@ -107,10 +106,10 @@ for table in $tables; do
         tail_rows=$(src_mysql "$SRC_DB" -N -e "SELECT * FROM \`$table\` ORDER BY \`$pk\` DESC LIMIT $SAMPLE_ROWS" | sort)
 
         {
-            printf "--- HEAD %s ---\n" "$SAMPLE_ROWS"
-            printf "%s\n" "$head_rows"
-            printf "--- TAIL %s ---\n" "$SAMPLE_ROWS"
-            printf "%s\n" "$tail_rows"
+            echo "--- HEAD ${SAMPLE_ROWS} ---"
+            echo "$head_rows"
+            echo "--- TAIL ${SAMPLE_ROWS} ---"
+            echo "$tail_rows"
         } > "$SNAPSHOT_DIR/samples/${table}.tsv"
     fi
     log "  [${current}/${table_count}] $table: サンプル取得完了"
