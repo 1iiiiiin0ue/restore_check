@@ -1,4 +1,6 @@
 # ダンプ・検証成果物
 dump.sql
+dump/
 snapshot/
 verify_results/
+grants/

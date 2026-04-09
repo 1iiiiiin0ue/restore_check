@@ -16,6 +16,7 @@ scripts/
   01_dump_and_snapshot.sh     ダンプ + スナップショット取得
   02_restore.sh               リストア
   03_verify.sh                検証
+  04_export_grants.sh         ユーザー権限エクスポート
 docker-compose.yml            ローカル検証用Docker環境(任意)
 ```
 
@@ -31,15 +32,22 @@ SRC_HOST="192.168.1.10"
 SRC_PORT="3306"
 SRC_USER="backup_user"
 SRC_PASS="password"
-SRC_DB="myapp"
 
 # リストア先(MariaDB)
 DST_HOST="192.168.1.20"
 DST_PORT="3306"
 DST_USER="root"
 DST_PASS="password"
-DST_DB="myapp"
+
+# 対象データベース
+# "--all": 全ユーザーDB(システムDB除外)
+# "db1 db2 db3": スペース区切りで複数DB指定
+# "myapp": 単一DB指定
+TARGET_DBS="--all"
 ```
+
+`--all`指定時、以下のシステムDBは自動的に除外される:
+- `information_schema`, `mysql`, `performance_schema`, `sys`
 
 ### 2. ダンプ + スナップショット取得
 
@@ -50,25 +58,27 @@ sh scripts/01_dump_and_snapshot.sh
 ```
 
 出力物:
-- `dump.sql` -- mysqldumpファイル
-- `snapshot/counts.tsv` -- 全テーブルの件数
-- `snapshot/samples/<テーブル名>.tsv` -- 各テーブルの先頭/末尾レコード
+- `dump/<DB名>.sql` -- DB別mysqldumpファイル
+- `snapshot/<DB名>/counts.tsv` -- 全テーブルの件数
+- `snapshot/<DB名>/samples/<テーブル名>.tsv` -- 各テーブルの先頭/末尾レコード
 
 ### 3. ダンプファイルの転送
 
 リストア先マシンにダンプとスナップショットを転送する。
 
 ```sh
-scp -r dump.sql snapshot/ user@mariadb-host:/path/to/restore_check/
+scp -r dump/ snapshot/ user@mariadb-host:/path/to/restore_check/
 ```
 
 ### 4. リストア
 
-リストア先MariaDBにダンプをリストアする。実行前に接続先情報が表示され、確認を求められる。
+リストア先MariaDBにダンプをリストアする。実行前に接続先情報と対象DB一覧が表示され、確認を求められる。
 
 ```sh
 sh scripts/02_restore.sh
 ```
+
+**文字セットの自動チェック:** リストア先のデフォルト文字セットが`utf8mb4`の場合、警告を表示する。MySQL5.0の`utf8`(= utf8mb3, 1文字3bytes)のダンプを`utf8mb4`(1文字4bytes)環境にリストアすると、インデックスサイズが上限(767bytes)を超えて`ERROR 1071: Specified key was too long`が発生する可能性がある。警告時に`y`を選択すると、DB作成時にutf8mb3を強制指定してリストアする。
 
 ### 5. 検証
 
@@ -78,33 +88,50 @@ sh scripts/02_restore.sh
 sh scripts/03_verify.sh
 ```
 
-検証結果は画面に表示され、`verify_results/report.txt` にも保存される。
+検証結果は画面に表示され、以下に保存される:
+- `verify_results/summary.txt` -- 全DB横断のサマリー
+- `verify_results/<DB名>/report.txt` -- DB別の詳細レポート
+
+### 6. ユーザー権限エクスポート(任意)
+
+MySQLのユーザーアカウントと権限(GRANT)をSQL形式でエクスポートする。
+`mysql`データベースを丸ごとダンプする代わりに、権限だけを安全に移行できる。
+
+```sh
+sh scripts/04_export_grants.sh
+```
+
+出力物:
+- `grants/grants.sql` -- 全ユーザーのGRANT文
+
+リストア先への適用:
+
+```sh
+# 適用前にgrants.sqlを確認・編集(root等の不要な権限を除外)
+mysql -h DST_HOST -P DST_PORT -u root -p < grants/grants.sql
+mysql -h DST_HOST -P DST_PORT -u root -p -e "FLUSH PRIVILEGES;"
+```
 
 ## 検証レポートの読み方
 
 ```
 ============================================
-  データ移行検証レポート
+  データ移行検証サマリー
   実行日時: 2026-03-09 15:30:00
-  リストア元: 192.168.1.10:3306 (myapp)
-  リストア先: 192.168.1.20:3306 (myapp)
+  リストア元: 192.168.1.10:3306
+  リストア先: 192.168.1.20:3306
+  対象DB: myapp analytics
 ============================================
 
-[件数比較]
-  [OK] users: 12345件 一致
-  [NG] orders: 旧=98765件 / 新=98760件 (差分: -5件)
-
-[サンプルレコード比較] (先頭5件 + 末尾5件)
-  [OK] users: 一致
-  [NG] orders: 差分あり -> verify_results/orders.diff
-
-============================================
-  検証結果: NG
-  対象テーブル数: 2
-  件数比較:     OK=1  NG=1
-  サンプル比較: OK=1  NG=1  SKIP=0
+  総合結果: NG
+  対象DB数: 2
+  対象テーブル総数: 15
+  件数比較:     OK=14  NG=1
+  サンプル比較: OK=14  NG=1  SKIP=0
 ============================================
 ```
+
+DB別の詳細は `verify_results/<DB名>/report.txt` を参照。
 
 | 表示 | 意味 |
 |------|------|
@@ -147,8 +174,8 @@ sh scripts/03_verify.sh
 | エラー内容 | 原因と対処 |
 |------------|------------|
 | `Unknown character set` | MySQL側の文字セットがMariaDBで未対応。ダンプファイル内の `CHARSET` を確認し、`sed` で置換 |
-| `Unknown system variable 'GTID_PURGED'` | ダンプにGTID設定が含まれている。`sed -i '/SET @@GLOBAL.GTID_PURGED/d' dump.sql` で削除 |
-| `Access denied` | DST_USER の権限不足。`GRANT ALL ON myapp.* TO ...` で付与 |
+| `Unknown system variable 'GTID_PURGED'` | ダンプにGTID設定が含まれている。`sed -i '/SET @@GLOBAL.GTID_PURGED/d' dump/<DB名>.sql` で削除 |
+| `Access denied` | DST_USER の権限不足。`GRANT ALL ON <DB名>.* TO ...` で付与 |
 | `ERROR 1071: Specified key was too long` | MySQL 5.0の `utf8`(3byte) -> MariaDB 10.xの `utf8mb4`(4byte) でインデックスサイズ超過。ダンプ内の `utf8mb4` を `utf8` に置換するか、`innodb_large_prefix=ON` を設定 |
 
 ### コマンドが見つからない
@@ -175,7 +202,7 @@ MySQLクライアントをインストールする。
 diffファイルの内容で原因を切り分ける。
 
 ```sh
-cat verify_results/<テーブル名>.diff
+cat verify_results/<DB名>/<テーブル名>.diff
 ```
 
 | diffの特徴 | 考えられる原因 |
@@ -204,6 +231,9 @@ docker compose exec mysql55 mysqladmin ping -h localhost -prootpass --wait=30
 sh scripts/01_dump_and_snapshot.sh
 sh scripts/02_restore.sh
 sh scripts/03_verify.sh
+
+# 権限エクスポート(任意)
+sh scripts/04_export_grants.sh
 
 # 後片付け
 docker compose down -v
