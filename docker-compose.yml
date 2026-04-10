@@ -16,16 +16,16 @@ services:
       timeout: 5s
       retries: 30
 
-  mariadb10:
-    image: mariadb:10.11
-    container_name: restore_check_mariadb10
+  mariadb11:
+    image: mariadb:11.4
+    container_name: restore_check_mariadb11
     environment:
       MARIADB_ROOT_PASSWORD: rootpass
       MARIADB_DATABASE: testdb
     ports:
       - "13307:3306"
     volumes:
-      - mariadb10_data:/var/lib/mysql
+      - mariadb11_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
@@ -34,4 +34,4 @@ services:
 
 volumes:
   mysql55_data:
-  mariadb10_data:
+  mariadb11_data:
