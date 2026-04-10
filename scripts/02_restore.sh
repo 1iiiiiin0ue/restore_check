@@ -9,7 +9,7 @@ set -eu
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
-SYSTEM_DBS="information_schema mysql performance_schema sys"
+SYSTEM_DBS="information_schema mysql performance_schema sys lost+found"
 
 log() {
     printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2
