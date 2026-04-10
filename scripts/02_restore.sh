@@ -73,36 +73,50 @@ log "接続OK"
 
 # 文字セットチェック
 dst_charset=$(dst_mysql -N -e "SELECT @@character_set_server")
-log "リストア先の文字セット: $dst_charset"
+dst_version=$(dst_mysql -N -e "SELECT @@version")
+# MariaDBバージョンからメジャー.マイナーを抽出(例: "11.4.10-MariaDB" -> "11.4")
+dst_major_minor=$(echo "$dst_version" | sed 's/^\([0-9]*\.[0-9]*\).*/\1/')
+log "リストア先: MariaDB $dst_version (文字セット: $dst_charset)"
+
+FORCE_UTF8MB3=0
 
 if [ "$dst_charset" = "utf8mb4" ]; then
-    log ""
-    log "警告: リストア先のデフォルト文字セットが utf8mb4 です"
-    log "  MySQL5.0(utf8mb3)のダンプをそのままリストアすると"
-    log "  ERROR 1071: Specified key was too long が発生する可能性があります"
-    log ""
-    log "対処方法:"
-    log "  1) リストア先のデフォルトを utf8mb3 に変更する(推奨)"
-    log "  2) このまま続行する(各DBにCHARACTER SET utf8を指定してリストア)"
-    log ""
-    printf "utf8mb3を指定してリストアを続行しますか? [y/N]: "
-    read -r charset_answer
-    case "$charset_answer" in
-        [yY])
-            FORCE_UTF8MB3=1
-            log "utf8mb3を指定してリストアします"
-            ;;
-        *)
-            log "中断しました"
-            log "リストア先のmy.cnfで以下を設定してください:"
-            log "  [mysqld]"
-            log "  character-set-server = utf8"
-            log "  collation-server = utf8_general_ci"
-            exit 0
-            ;;
-    esac
-else
-    FORCE_UTF8MB3=0
+    # MariaDB10.3以降はinnodb_large_prefixが常にON(インデックス上限3072bytes)
+    # utf8mb4でもVARCHAR(255)=1020bytesで問題なし
+    major=$(echo "$dst_major_minor" | cut -d. -f1)
+    minor=$(echo "$dst_major_minor" | cut -d. -f2)
+    safe=0
+    if [ "$major" -gt 10 ]; then
+        safe=1
+    elif [ "$major" -eq 10 ] && [ "$minor" -ge 3 ]; then
+        safe=1
+    fi
+
+    if [ "$safe" -eq 1 ]; then
+        log "  MariaDB ${dst_major_minor} -> innodb_large_prefix常時ON(上限3072bytes)、utf8mb4で問題なし"
+    else
+        log ""
+        log "警告: リストア先のデフォルト文字セットが utf8mb4 です"
+        log "  MariaDB ${dst_major_minor} はinnodb_large_prefixがデフォルトOFFの可能性があり"
+        log "  ERROR 1071: Specified key was too long が発生する可能性があります"
+        log ""
+        printf "utf8mb3を指定してリストアを続行しますか? [y/N]: "
+        read -r charset_answer
+        case "$charset_answer" in
+            [yY])
+                FORCE_UTF8MB3=1
+                log "utf8mb3を指定してリストアします"
+                ;;
+            *)
+                log "中断しました"
+                log "リストア先のmy.cnfで以下を設定してください:"
+                log "  [mysqld]"
+                log "  character-set-server = utf8"
+                log "  collation-server = utf8_general_ci"
+                exit 0
+                ;;
+        esac
+    fi
 fi
 
 # 対象DB一覧を解決
