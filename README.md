@@ -17,6 +17,7 @@ scripts/
   02_restore.sh               リストア
   03_verify.sh                検証
   04_export_grants.sh         ユーザー権限エクスポート
+  05_rollback.sh              リストア先をリストア前状態へ戻す
 docker-compose.yml            ローカル検証用Docker環境(任意)
 ```
 
@@ -92,7 +93,44 @@ sh scripts/03_verify.sh
 - `verify_results/summary.txt` -- 全DB横断のサマリー
 - `verify_results/<DB名>/report.txt` -- DB別の詳細レポート
 
-### 6. ユーザー権限エクスポート(任意)
+### 6. リストアのやり直し(任意)
+
+リストアに失敗した、またはダンプファイルを修正して再リストアしたい場合、`05_rollback.sh` でリストア先をリストア前の状態に戻せる。
+
+```sh
+sh scripts/05_rollback.sh
+```
+
+`02_restore.sh` 実行時に `restore_state/pre_restore_dbs.txt` へ保存された「リストア前に存在していたユーザDB一覧」を参照し、**リストアで新規作成されたDBのみ** DROP する。リストア前から存在していたDBは既定で保護される。
+
+```sh
+# 保護されたDBも含めて強制的にDROP
+sh scripts/05_rollback.sh --force
+```
+
+実行前に計画(DROP対象/保護対象/未存在)が表示され、確認プロンプトで承認後にDROPを実行する。
+
+| 分類 | 挙動 |
+|------|------|
+| リストア前に存在しなかったDB | DROP |
+| リストア前から存在していたDB | 既定: 保護(スキップ) / `--force`: DROP |
+| リストア先に存在しないDB | スキップ |
+
+再リストアしたい場合は、ロールバック後に修正したダンプで `02_restore.sh` を再実行する。
+
+**状態ファイルのライフサイクル(`restore_state/` 配下2ファイル):**
+
+| ファイル | 役割 |
+|----------|------|
+| `pre_restore_dbs.txt` | リストア前に存在していたユーザDB一覧(保護対象の判定に使用) |
+| `restored_dbs.txt` | 02_restore.sh でリストア対象にしたDB一覧(ロールバック対象の解決に使用) |
+
+- `02_restore.sh` は `pre_restore_dbs.txt` を**初回実行時のみ**記録する。2回目以降は既存ファイルを尊重して上書きしない(初回リストアで作成したDBを「リストア前」と誤認しないため)。
+- `02_restore.sh` は `restored_dbs.txt` に実行時の対象DBを追記する(重複排除)。dumpディレクトリの変化に影響されずロールバックできるよう、実対象を固定記録する。
+- `05_rollback.sh` は成功後に両ファイルを**自動削除**する。次回 `02_restore.sh` 実行時に現在のDST状態が再スナップショットされる。
+- 状態管理をリセットしたい場合は `restore_state/` ディレクトリを手動で削除してから `02_restore.sh` を実行する。
+
+### 7. ユーザー権限エクスポート(任意)
 
 MySQLのユーザーアカウントと権限(GRANT)をSQL形式でエクスポートする。
 `mysql`データベースを丸ごとダンプする代わりに、権限だけを安全に移行できる。
@@ -234,6 +272,9 @@ sh scripts/03_verify.sh
 
 # 権限エクスポート(任意)
 sh scripts/04_export_grants.sh
+
+# リストアのやり直し(任意)
+sh scripts/05_rollback.sh
 
 # 後片付け
 docker compose down -v

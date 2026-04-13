@@ -4,3 +4,4 @@ dump/
 snapshot/
 verify_results/
 grants/
+restore_state/

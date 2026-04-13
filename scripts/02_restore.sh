@@ -144,6 +144,46 @@ case "$answer" in
         ;;
 esac
 
+# リストア前の既存DB一覧を保存(ロールバック時に保護すべきDBを判別するため)
+# 初回のみ記録し、再実行時は既存ファイルを維持する。
+# 再実行時に上書きすると、初回リストアで作成したDBが"リストア前に存在"と誤記録され、
+# ロールバックで保護対象になりDROPされなくなる。
+mkdir -p "$RESTORE_STATE_DIR"
+pre_restore_file="$RESTORE_STATE_DIR/pre_restore_dbs.txt"
+if [ -f "$pre_restore_file" ]; then
+    log "リストア前DB一覧は既存のものを使用: $pre_restore_file"
+    log "  (リセットするには $RESTORE_STATE_DIR/ を削除してから再実行)"
+else
+    {
+        echo "# リストア前に存在していたユーザDB一覧"
+        echo "# 作成日時: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "# リストア先: ${DST_HOST}:${DST_PORT}"
+        dst_mysql -N -e "SHOW DATABASES" | while IFS= read -r existing_db; do
+            if ! is_system_db "$existing_db"; then
+                echo "$existing_db"
+            fi
+        done
+    } > "$pre_restore_file"
+    log "リストア前DB一覧を保存: $pre_restore_file"
+fi
+
+# リストア対象DBを状態ファイルに追記(ロールバック時の対象解決に使用)
+# dumpディレクトリ変化に影響されないよう、実リストア対象をここに固定記録する。
+restored_dbs_file="$RESTORE_STATE_DIR/restored_dbs.txt"
+if [ ! -f "$restored_dbs_file" ]; then
+    {
+        echo "# 02_restore.shでリストア対象にしたDB一覧(重複排除)"
+        echo "# 初回作成日時: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "# リストア先: ${DST_HOST}:${DST_PORT}"
+    } > "$restored_dbs_file"
+fi
+for db in $databases; do
+    if ! grep -v '^#' "$restored_dbs_file" | grep -Fxq -- "$db"; then
+        echo "$db" >> "$restored_dbs_file"
+    fi
+done
+log "リストア対象DB一覧を記録: $restored_dbs_file"
+
 db_current=0
 for db in $databases; do
     db_current=$((db_current + 1))
