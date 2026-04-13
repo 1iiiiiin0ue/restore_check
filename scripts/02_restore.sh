@@ -9,7 +9,9 @@ set -eu
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
-# config.env後方互換: 古いconfig.envにRESTORE_STATE_DIRが無い場合のデフォルト
+# config.env後方互換: 古いconfig.envに無い場合のデフォルト
+: "${TARGET_DBS:=--all}"
+: "${DUMP_DIR:=dump}"
 : "${RESTORE_STATE_DIR:=restore_state}"
 
 SYSTEM_DBS="information_schema mysql performance_schema sys"

@@ -9,6 +9,10 @@ set -eu
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
+# config.env後方互換: 古いconfig.envに無い場合のデフォルト
+: "${TARGET_DBS:=--all}"
+: "${DUMP_DIR:=dump}"
+
 SYSTEM_DBS="information_schema mysql performance_schema sys"
 
 log() {
