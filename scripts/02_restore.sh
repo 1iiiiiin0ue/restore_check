@@ -14,8 +14,6 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 : "${DUMP_DIR:=dump}"
 : "${RESTORE_STATE_DIR:=restore_state}"
 
-SYSTEM_DBS="information_schema mysql performance_schema sys"
-
 log() {
     printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2
 }
@@ -24,26 +22,15 @@ dst_mysql() {
     mysql -h "$DST_HOST" -P "$DST_PORT" -u "$DST_USER" -p"$DST_PASS" "$@" 2>/dev/null
 }
 
-is_system_db() {
-    local db="$1"
-    for sdb in $SYSTEM_DBS; do
-        if [ "$db" = "$sdb" ]; then
-            return 0
-        fi
-    done
-    return 1
-}
-
 resolve_databases() {
     if [ "$TARGET_DBS" = "--all" ]; then
-        # リストア時はダンプディレクトリ内の.sqlファイルからDB名を取得
+        # ダンプディレクトリ内の.sqlファイル名からDB名を取得
+        # (01_dump_and_snapshot.sh 時点でシステムDBは除外済み)
         resolved=""
         for f in "$DUMP_DIR"/*.sql; do
             [ -f "$f" ] || continue
             db=$(basename "$f" .sql)
-            if ! is_system_db "$db"; then
-                resolved="$resolved $db"
-            fi
+            resolved="$resolved $db"
         done
         echo "$resolved" | sed 's/^ //'
     else
@@ -149,45 +136,12 @@ case "$answer" in
         ;;
 esac
 
-# リストア前の既存DB一覧を保存(ロールバック時に保護すべきDBを判別するため)
-# 初回のみ記録し、再実行時は既存ファイルを維持する。
-# 再実行時に上書きすると、初回リストアで作成したDBが"リストア前に存在"と誤記録され、
-# ロールバックで保護対象になりDROPされなくなる。
+# ロールバック用の状態ファイルを準備
+# 05_rollback.sh が読むファイル: リストアで"新規作成"したDBのみを記録する。
+# 既にDST側に存在していたDBは記録しない=ロールバック対象外となる(既存データを保護)。
 mkdir -p "$RESTORE_STATE_DIR"
-pre_restore_file="$RESTORE_STATE_DIR/pre_restore_dbs.txt"
-if [ -f "$pre_restore_file" ]; then
-    log "リストア前DB一覧は既存のものを使用: $pre_restore_file"
-    log "  (リセットするには $RESTORE_STATE_DIR/ を削除してから再実行)"
-else
-    {
-        echo "# リストア前に存在していたユーザDB一覧"
-        echo "# 作成日時: $(date '+%Y-%m-%d %H:%M:%S')"
-        echo "# リストア先: ${DST_HOST}:${DST_PORT}"
-        dst_mysql -N -e "SHOW DATABASES" | while IFS= read -r existing_db; do
-            if ! is_system_db "$existing_db"; then
-                echo "$existing_db"
-            fi
-        done
-    } > "$pre_restore_file"
-    log "リストア前DB一覧を保存: $pre_restore_file"
-fi
-
-# リストア対象DBを状態ファイルに追記(ロールバック時の対象解決に使用)
-# dumpディレクトリ変化に影響されないよう、実リストア対象をここに固定記録する。
-restored_dbs_file="$RESTORE_STATE_DIR/restored_dbs.txt"
-if [ ! -f "$restored_dbs_file" ]; then
-    {
-        echo "# 02_restore.shでリストア対象にしたDB一覧(重複排除)"
-        echo "# 初回作成日時: $(date '+%Y-%m-%d %H:%M:%S')"
-        echo "# リストア先: ${DST_HOST}:${DST_PORT}"
-    } > "$restored_dbs_file"
-fi
-for db in $databases; do
-    if ! grep -v '^#' "$restored_dbs_file" | grep -Fxq -- "$db"; then
-        echo "$db" >> "$restored_dbs_file"
-    fi
-done
-log "リストア対象DB一覧を記録: $restored_dbs_file"
+created_dbs_file="$RESTORE_STATE_DIR/created_dbs.txt"
+[ -f "$created_dbs_file" ] || : > "$created_dbs_file"
 
 db_current=0
 for db in $databases; do
@@ -201,6 +155,17 @@ for db in $databases; do
 
     log ""
     log "========== [${db_current}/${db_count}] データベース: $db =========="
+
+    # ロールバック対象判定: DST未存在のDBはcreated_dbs.txtに記録
+    db_exists=$(dst_mysql -N -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$db'")
+    if [ -z "$db_exists" ]; then
+        if ! grep -Fxq -- "$db" "$created_dbs_file"; then
+            echo "$db" >> "$created_dbs_file"
+        fi
+        log "新規DB(ロールバック対象として記録)"
+    else
+        log "既存DB(ロールバック対象外)"
+    fi
 
     # DB作成(存在しなければ)
     log "データベース作成: $db"

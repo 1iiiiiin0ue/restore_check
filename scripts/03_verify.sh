@@ -11,8 +11,6 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # config.env後方互換: 古いconfig.envに無い場合のデフォルト
 : "${TARGET_DBS:=--all}"
 
-SYSTEM_DBS="information_schema mysql performance_schema sys"
-
 log() {
     printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2
 }
@@ -37,26 +35,15 @@ get_primary_key() {
     "
 }
 
-is_system_db() {
-    local db="$1"
-    for sdb in $SYSTEM_DBS; do
-        if [ "$db" = "$sdb" ]; then
-            return 0
-        fi
-    done
-    return 1
-}
-
 resolve_databases() {
     if [ "$TARGET_DBS" = "--all" ]; then
         # スナップショットディレクトリからDB名を取得
+        # (01_dump_and_snapshot.sh 時点でシステムDBは除外済み)
         resolved=""
         for d in "$SNAPSHOT_DIR"/*/; do
             [ -d "$d" ] || continue
             db=$(basename "$d")
-            if ! is_system_db "$db"; then
-                resolved="$resolved $db"
-            fi
+            resolved="$resolved $db"
         done
         echo "$resolved" | sed 's/^ //'
     else
