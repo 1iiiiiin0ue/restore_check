@@ -15,6 +15,9 @@ set -eu
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 . "$SCRIPT_DIR/config.env"
 
+# config.env後方互換: 古いconfig.envにRESTORE_STATE_DIRが無い場合のデフォルト
+: "${RESTORE_STATE_DIR:=restore_state}"
+
 FORCE=0
 
 # 引数解析
